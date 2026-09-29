@@ -273,6 +273,7 @@ export function syncChrome(state) {
   undoBtn.setAttribute("aria-label", t("undo"))
   if (level.undoMax === 0) {
     undoBtn.hidden = true
+    undoBtn.disabled = true
   } else {
     undoBtn.hidden = false
     undoBadge.hidden = false

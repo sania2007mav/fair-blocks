@@ -463,6 +463,12 @@ button {
   gap: 4px;
 }
 
+/* Author display values (inline-flex, flex) must not resurrect a hidden
+   control. This also covers the score floater and the preview block. */
+[hidden] {
+  display: none !important;
+}
+
 .footer .undo-btn {
   flex-direction: column;
   gap: 2px;
