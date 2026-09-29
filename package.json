@@ -1,0 +1,10 @@
+{
+  "name": "chestnye-bloki",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/fairness.test.mjs",
+    "simulate": "node tests/simulate.mjs",
+    "start": "python3 -m http.server 8765"
+  }
+}
