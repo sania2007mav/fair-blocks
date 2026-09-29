@@ -15,6 +15,25 @@ export const STORAGE_KEY = "chestnye-bloki-v1"
 export const THEMES = ["classic", "dark", "pastel", "wood"]
 export const LANGS = ["ru", "kk", "en"]
 
+/** Easiest first. `hints: null` means unlimited. */
+export const DIFFICULTIES = ["veryEasy", "easy", "normal", "hard", "expert"]
+
+export const LEVELS = {
+  veryEasy: { hints: null, hintMode: "full", deal: "friendly", autoMs: 6000, multiplier: 1, earn: false, cap: null },
+  easy: { hints: null, hintMode: "full", deal: "placeable", autoMs: 0, multiplier: 1, earn: false, cap: null },
+  normal: { hints: 3, hintMode: "full", deal: "fair", autoMs: 0, multiplier: 1, earn: true, cap: 3 },
+  hard: { hints: 1, hintMode: "single", deal: "awkward", autoMs: 0, multiplier: 1, earn: false, cap: 1 },
+  expert: { hints: 0, hintMode: "none", deal: "hardest", autoMs: 0, multiplier: 2, earn: false, cap: 0 },
+}
+
+export function levelOf(id) {
+  return LEVELS[id] || LEVELS.normal
+}
+
+export function emptyBests() {
+  return { veryEasy: 0, easy: 0, normal: 0, hard: 0, expert: 0 }
+}
+
 export function defaultSettings() {
   return {
     theme: "classic",

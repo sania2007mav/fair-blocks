@@ -1,6 +1,6 @@
 /** localStorage save/load. `deserialize` is pure so tests can round-trip JSON. */
 
-import { SIZE, STORAGE_KEY, THEMES, LANGS, COLOR_COUNT, defaultSettings } from "./config.js"
+import { SIZE, STORAGE_KEY, THEMES, LANGS, COLOR_COUNT, DIFFICULTIES, defaultSettings, emptyBests, levelOf } from "./config.js"
 import { getShape } from "./pieces.js"
 
 function isBoard(board) {
@@ -41,6 +41,21 @@ function readNumber(value) {
   return Number.isFinite(value) && value >= 0 ? Math.floor(value) : 0
 }
 
+function readBests(data, difficulty, best) {
+  const bests = emptyBests()
+  if (data && data.bests && typeof data.bests === "object") {
+    for (const id of DIFFICULTIES) bests[id] = readNumber(data.bests[id])
+  }
+  bests[difficulty] = Math.max(bests[difficulty], best)
+  return bests
+}
+
+function readHints(value, difficulty) {
+  if (value === null) return null
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value)
+  return levelOf(difficulty).hints
+}
+
 /** @returns {{ state: object | null, best: number }} */
 export function deserialize(raw) {
   let data = raw
@@ -53,26 +68,34 @@ export function deserialize(raw) {
   }
   if (!data || typeof data !== "object") return { state: null, best: 0 }
   const best = readNumber(data.best)
-  if (data.v !== 1 || !isBoard(data.board) || !isHand(data.hand)) {
+  if ((data.v !== 1 && data.v !== 2) || !isBoard(data.board) || !isHand(data.hand)) {
     return { state: null, best }
   }
   if (data.preview != null && !isHand(data.preview)) return { state: null, best }
+  const difficulty = DIFFICULTIES.includes(data.difficulty) ? data.difficulty : "normal"
+  const bests = readBests(data, difficulty, best)
   const state = {
     board: data.board.map((row) => row.slice()),
     hand: data.hand.map((piece) => ({ ...piece })),
     preview: data.preview ? data.preview.map((piece) => ({ ...piece })) : null,
     score: readNumber(data.score),
     streak: readNumber(data.streak),
-    best,
+    best: Math.max(best, bests[difficulty]),
+    bests,
+    difficulty,
+    hintsLeft: readHints(data.hintsLeft, difficulty),
     over: Boolean(data.over),
     settings: readSettings(data.settings),
   }
-  if (state.score > state.best) state.best = state.score
+  if (state.score > state.best) {
+    state.best = state.score
+    state.bests[difficulty] = state.score
+  }
   return { state, best: state.best }
 }
 
 export function serialize(state) {
-  return JSON.stringify({ v: 1, ...state })
+  return JSON.stringify({ v: 2, ...state })
 }
 
 export function loadGame() {

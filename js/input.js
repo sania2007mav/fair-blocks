@@ -89,6 +89,7 @@ export function setupDrag({ getState, isBusy, onDrop, onDragStart }) {
     if (drag || isBusy()) return
     if (document.getElementById("settings").classList.contains("open")) return
     if (document.getElementById("confirm").classList.contains("open")) return
+    if (document.getElementById("picker").classList.contains("open")) return
     const slotEl = event.target.closest("[data-slot]")
     if (!slotEl || slotEl.classList.contains("used") || slotEl.classList.contains("nofit")) return
     const state = getState()

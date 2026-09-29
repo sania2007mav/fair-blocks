@@ -1,6 +1,6 @@
 /** DOM view. Reads state, never changes rules. */
 
-import { SIZE } from "./config.js"
+import { SIZE, DIFFICULTIES, levelOf } from "./config.js"
 import { getShape } from "./pieces.js"
 import { pieceFits } from "./generator.js"
 import { translate, floatCaption } from "./i18n.js"
@@ -227,14 +227,48 @@ export function syncChrome(state) {
   setText("title", t("title"))
   setText("score", String(state.score))
   setText("score-label", t("score"))
+  const difficulty = state.difficulty || "normal"
+  const level = levelOf(difficulty)
+  const diffKey = {
+    veryEasy: "diffVeryEasy",
+    easy: "diffEasy",
+    normal: "diffNormal",
+    hard: "diffHard",
+    expert: "diffExpert",
+  }[difficulty] || "diffNormal"
+  setText("diff-name", t(diffKey))
+  const mult = $("mult-wrap")
+  if (mult) {
+    mult.hidden = !(level.multiplier > 1)
+    setText("mult-label", t("multiplier"))
+    setText("mult", "×" + (level.multiplier || 1))
+  }
   setText("best-label", t("best"))
   setText("best", String(state.best))
   setText("streak-label", t("streak"))
   setText("streak", "×" + state.streak)
   $("streak-wrap").hidden = state.streak < 1
-  setText("hint", t("hint"))
-  $("hint").hidden = state.settings.seenHint
+  const hintEl = $("hint")
+  if (!hintEl.classList.contains("status")) {
+    setText("hint", t("hint"))
+    hintEl.hidden = state.settings.seenHint
+  }
   setText("btn-new", t("newGame"))
+  setText("btn-hint-label", t("hintBtn"))
+  const hintBtn = $("btn-hint")
+  const badge = $("hint-count")
+  if (level.hintMode === "none") {
+    hintBtn.disabled = true
+    badge.hidden = true
+    hintBtn.title = t("hintOff")
+  } else {
+    hintBtn.disabled = false
+    badge.hidden = false
+    hintBtn.removeAttribute("title")
+    badge.textContent = state.hintsLeft == null ? "∞" : String(state.hintsLeft)
+  }
+  setText("diff-label", t("difficulty"))
+  syncDiffChips(state, t)
   setText("board-caption", t("boardLabel"))
   ui.board.setAttribute("aria-label", t("boardLabel"))
 
@@ -358,4 +392,146 @@ export function markSlotDragging(index, on) {
 
 export function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
+const BLURBS = {
+  veryEasy: "blurbVeryEasy",
+  easy: "blurbEasy",
+  normal: "blurbNormal",
+  hard: "blurbHard",
+  expert: "blurbExpert",
+}
+
+const DIFF_NAMES = {
+  veryEasy: "diffVeryEasy",
+  easy: "diffEasy",
+  normal: "diffNormal",
+  hard: "diffHard",
+  expert: "diffExpert",
+}
+
+function syncDiffChips(state, t) {
+  const root = $("diff-picks")
+  if (!root) return
+  if (root.childElementCount === 0) {
+    for (const id of DIFFICULTIES) {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.className = "level"
+      button.dataset.diff = id
+      root.appendChild(button)
+    }
+  }
+  for (const button of root.querySelectorAll("[data-diff]")) {
+    const id = button.dataset.diff
+    button.textContent = t(DIFF_NAMES[id] || id)
+    button.setAttribute("aria-pressed", id === (state.difficulty || "normal") ? "true" : "false")
+  }
+}
+
+export function syncPicker(state, selected) {
+  const lang = state.settings.lang
+  const t = (key) => translate(lang, key)
+  setText("picker-title", t("chooseDifficulty"))
+  setText("btn-play", t("play"))
+  const root = $("levels")
+  root.replaceChildren()
+  const bests = state.bests || {}
+  for (const id of DIFFICULTIES) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.className = "level"
+    button.dataset.diff = id
+    button.setAttribute("aria-pressed", id === selected ? "true" : "false")
+    const name = document.createElement("span")
+    name.className = "level-name"
+    name.textContent = t(DIFF_NAMES[id])
+    const best = document.createElement("span")
+    best.className = "level-best"
+    const value = Number.isFinite(bests[id]) ? bests[id] : id === (state.difficulty || "normal") ? state.best : 0
+    best.textContent = t("best") + " " + value
+    const blurb = document.createElement("span")
+    blurb.className = "level-blurb"
+    blurb.textContent = t(BLURBS[id])
+    button.append(name, best, blurb)
+    root.appendChild(button)
+  }
+}
+
+export function setPickerOpen(open) {
+  const el = $("picker")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function clearPlan() {
+  for (const cell of ui.cells) {
+    cell.classList.remove("plan")
+    cell.style.removeProperty("animation-delay")
+    if (!cell.classList.contains("hint")) cell.style.removeProperty("--hint")
+    const badge = cell.querySelector(":scope > .order")
+    if (badge) badge.remove()
+  }
+  if (!ui.tray) return
+  for (const slot of ui.tray.querySelectorAll(".planned")) {
+    slot.classList.remove("planned")
+    const badge = slot.querySelector(":scope > .order")
+    if (badge) badge.remove()
+  }
+}
+
+/** Ghost the hint steps. Overlapping cells keep the earliest order number. */
+export function paintPlan(board, hand, steps) {
+  clearPlan()
+  if (!steps || steps.length === 0) return
+  const claimed = new Map()
+  for (const step of steps) {
+    const piece = hand[step.slot]
+    if (!piece) continue
+    const shape = getShape(piece.shapeId)
+    if (!shape) continue
+    for (const [dr, dc] of shape.cells) {
+      const r = step.row + dr
+      const c = step.col + dc
+      if (r < 0 || c < 0 || r >= SIZE || c >= SIZE) continue
+      const index = r * SIZE + c
+      const prev = claimed.get(index)
+      if (prev && prev.order <= step.order) continue
+      claimed.set(index, { order: step.order, color: piece.color })
+    }
+  }
+  for (const [index, info] of claimed) {
+    const el = ui.cells[index]
+    if (!el) continue
+    el.classList.add("plan")
+    el.style.setProperty("--hint", "var(--p" + info.color + ")")
+    el.style.animationDelay = (info.order - 1) * 120 + "ms"
+    const badge = document.createElement("span")
+    badge.className = "order"
+    badge.textContent = String(info.order)
+    el.appendChild(badge)
+  }
+  const slotOrder = new Map()
+  for (const step of steps) {
+    if (!slotOrder.has(step.slot) || step.order < slotOrder.get(step.slot)) {
+      slotOrder.set(step.slot, step.order)
+    }
+  }
+  for (const [slot, order] of slotOrder) {
+    const el = ui.tray.querySelector('[data-slot="' + slot + '"]')
+    if (!el) continue
+    el.classList.add("planned")
+    el.style.animationDelay = (order - 1) * 120 + "ms"
+    const badge = document.createElement("span")
+    badge.className = "order"
+    badge.textContent = String(order)
+    el.appendChild(badge)
+  }
+}
+
+export function showHintMessage(lang, key) {
+  const el = $("hint")
+  el.hidden = false
+  el.classList.add("status")
+  el.textContent = translate(lang, key)
 }

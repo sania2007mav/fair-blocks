@@ -122,6 +122,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
+  position: relative;
   padding:
     calc(10px + env(safe-area-inset-top))
     14px
@@ -227,6 +229,10 @@ button {
   color: var(--muted);
   font-size: 0.92rem;
   font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
 }
 
 .subline strong {
@@ -325,6 +331,46 @@ button {
   filter: brightness(1.35);
 }
 
+.cell.plan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--hint, var(--accent));
+  opacity: 0.78;
+  animation: planin 0.45s ease both;
+  animation-delay: inherit;
+}
+
+.order {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 1.15em;
+  height: 1.15em;
+  padding: 0 0.15em;
+  border-radius: 999px;
+  background: #1c2340;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  animation: planin 0.45s ease both;
+  animation-delay: inherit;
+}
+
+.slot .order {
+  top: 6px;
+  right: 6px;
+  left: auto;
+  transform: none;
+}
+
 .cell.glow { animation: glow 0.28s ease-in-out infinite alternate; }
 
 .piece { display: grid; }
@@ -381,18 +427,46 @@ button {
   touch-action: none;
 }
 
+.slot { position: relative; }
 .slot.used { background: transparent; box-shadow: none; }
 .slot.dragging { opacity: 0.28; }
 .slot.nofit { box-shadow: inset 0 0 0 2px var(--danger); }
+.slot.planned { box-shadow: inset 0 0 0 2px var(--accent); }
 
-.footer { display: flex; justify-content: center; }
+.footer {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
 
 .btn {
   border-radius: 999px;
   padding: 12px 20px;
   background: var(--panel);
   font-weight: 700;
-  min-width: 132px;
+  min-width: 0;
+}
+
+.footer .btn { flex: 1; }
+
+.hint-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.hint-btn:disabled { opacity: 0.45; }
+
+.count {
+  min-width: 1.5em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  font-weight: 800;
 }
 
 .btn.primary {
@@ -538,6 +612,54 @@ body.dragging { cursor: grabbing; }
   background: rgba(10, 14, 28, 0.45);
 }
 
+.picker { background: rgba(10, 14, 28, 0.72); }
+
+.picker-card {
+  width: min(100%, 360px);
+  max-height: min(92dvh, 760px);
+  overflow: auto;
+  text-align: left;
+}
+
+.picker-card h2 { text-align: center; }
+
+.levels { display: flex; flex-direction: column; gap: 6px; }
+
+.level {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "name best" "blurb blurb";
+  gap: 1px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  text-align: left;
+}
+
+.level-name { grid-area: name; font-weight: 800; }
+.level-best { grid-area: best; color: var(--muted); font-size: 0.75rem; font-weight: 700; }
+.level-blurb { grid-area: blurb; color: var(--muted); font-size: 0.75rem; line-height: 1.25; }
+
+.level[aria-pressed="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.diff-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.diff-picks .level {
+  display: block;
+  width: auto;
+  padding: 8px 10px;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
 .card {
   width: min(100%, 320px);
   background: var(--panel-solid);
@@ -628,6 +750,29 @@ body.dragging { cursor: grabbing; }
   75% { transform: translateX(6px); }
 }
 
+@keyframes planin {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+.cell.plan::after {
+  animation-name: planghost;
+}
+
+@keyframes planghost {
+  from { opacity: 0; }
+  to { opacity: 0.78; }
+}
+
+.slot .order {
+  animation-name: planbadge;
+}
+
+@keyframes planbadge {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 @keyframes floatup {
   0% { opacity: 0; transform: translate(-50%, -20%); }
   18% { opacity: 1; transform: translate(-50%, -50%); }
@@ -637,7 +782,7 @@ body.dragging { cursor: grabbing; }
 
 @media (max-height: 700px) {
   .slot, .tray { min-height: 84px; }
-  .hint { display: none; }
+  .hint:not(.status) { display: none; }
   .score { font-size: 1.8rem; }
   .preview-row { min-height: 40px; }
 }

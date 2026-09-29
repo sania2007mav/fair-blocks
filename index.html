@@ -44,6 +44,13 @@
       <p class="subline">
         <span id="score-label">Очки</span>
         <span class="sep" aria-hidden="true">·</span>
+        <span id="diff-name">Нормально</span>
+        <span id="mult-wrap" hidden>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="mult-label">Множитель</span>
+          <strong id="mult">×2</strong>
+        </span>
+        <span class="sep" aria-hidden="true">·</span>
         <span id="best-label">Рекорд</span>
         <strong id="best">0</strong>
         <span id="streak-wrap" hidden>
@@ -76,6 +83,10 @@
     <section id="tray" class="tray"></section>
 
     <footer class="footer">
+      <button id="btn-hint" class="btn hint-btn" type="button">
+        <span id="btn-hint-label">Подсказка</span>
+        <span id="hint-count" class="count">3</span>
+      </button>
       <button id="btn-new" class="btn" type="button">Новая игра</button>
     </footer>
 
@@ -89,6 +100,8 @@
         <button type="button" data-lang-pick="kk" aria-pressed="false">ҚАЗ</button>
         <button type="button" data-lang-pick="en" aria-pressed="false">ENG</button>
       </div>
+      <p id="diff-label" class="field-label">Сложность</p>
+      <div id="diff-picks" class="diff-picks" role="group"></div>
       <p id="theme-label" class="field-label">Тема</p>
       <div class="themes" role="group">
         <button type="button" class="swatch swatch-classic" data-theme-pick="classic" aria-pressed="true" aria-label="Классика"></button>
@@ -111,6 +124,14 @@
         <p class="over-score"><span id="over-score-label">Очки</span> <strong id="over-score">0</strong></p>
         <p class="over-best"><span id="over-best-label">Рекорд</span> <strong id="over-best">0</strong></p>
         <button id="btn-again" class="btn primary" type="button">Заново</button>
+      </div>
+    </div>
+
+    <div id="picker" class="overlay picker" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="picker-title">
+      <div class="card picker-card">
+        <h2 id="picker-title">Выберите сложность</h2>
+        <div id="levels" class="levels"></div>
+        <button id="btn-play" class="btn primary" type="button">Играть</button>
       </div>
     </div>
 

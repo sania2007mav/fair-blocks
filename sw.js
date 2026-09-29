@@ -2,7 +2,7 @@
  * Offline shell. Network-first while online, cache fallback when not.
  * Bump CACHE when a breaking change should drop old precached files.
  */
-const CACHE = "chestnye-bloki-v1"
+const CACHE = "chestnye-bloki-v2"
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,6 +13,7 @@ const ASSETS = [
   "./js/board.js",
   "./js/scoring.js",
   "./js/generator.js",
+  "./js/solver.js",
   "./js/game.js",
   "./js/storage.js",
   "./js/i18n.js",

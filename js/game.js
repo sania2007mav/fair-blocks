@@ -3,7 +3,7 @@
  * A port can call `placePiece` and `createMatch` and render the result.
  */
 
-import { defaultSettings } from "./config.js"
+import { DIFFICULTIES, defaultSettings, emptyBests, levelOf } from "./config.js"
 import {
   emptyBoard,
   canPlace,
@@ -14,22 +14,60 @@ import {
   clearLines,
 } from "./board.js"
 import { getShape } from "./pieces.js"
-import { dealFair, ensureFair, handHasFit, pieceFits } from "./generator.js"
+import { dealHand, ensureHand, handHasFit, pieceFits } from "./generator.js"
 import { scorePlacement } from "./scoring.js"
+import { solve } from "./solver.js"
+
+function copyBests(state) {
+  const bests = emptyBests()
+  if (state && state.bests) {
+    for (const id of DIFFICULTIES) {
+      const value = state.bests[id]
+      bests[id] = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+    }
+    return bests
+  }
+  const fallback = state && Number.isFinite(state.best) ? Math.floor(state.best) : 0
+  const id = state && state.difficulty && levelOf(state.difficulty) ? state.difficulty : "normal"
+  if (DIFFICULTIES.includes(id)) bests[id] = fallback
+  else bests.normal = fallback
+  return bests
+}
+
+function normalizeBestArg(best, difficulty) {
+  if (best && typeof best === "object") return copyBests({ bests: best })
+  const bests = emptyBests()
+  const value = Number.isFinite(best) ? Math.floor(best) : 0
+  const id = DIFFICULTIES.includes(difficulty) ? difficulty : "normal"
+  bests[id] = value
+  if (id !== "normal" && difficulty === "normal") bests.normal = value
+  return bests
+}
 
 /** Re-validate a save: an unfinished empty hand is re-dealt, a dead hand is game over. */
 export function restoreMatch(state) {
   if (!state) return null
-  const remaining = state.hand.filter((piece) => !piece.used)
+  const difficulty = DIFFICULTIES.includes(state.difficulty) ? state.difficulty : "normal"
+  const level = levelOf(difficulty)
+  const bests = copyBests({ ...state, difficulty })
+  const hintsLeft = state.hintsLeft === undefined ? level.hints : state.hintsLeft
+  const base = {
+    ...state,
+    difficulty,
+    bests,
+    hintsLeft,
+    best: Math.max(state.best || 0, bests[difficulty] || 0),
+  }
+  const remaining = base.hand.filter((piece) => !piece.used)
   if (remaining.length === 0) {
-    const hand = ensureFair(state.board, state.preview, Math.random)
-    if (!hand) return { ...state, over: true }
-    return { ...state, hand, preview: dealFair(state.board, Math.random), over: false }
+    const hand = ensureHand(base.board, base.preview, Math.random, difficulty)
+    if (!hand) return { ...base, over: true }
+    return { ...base, hand, preview: dealHand(base.board, Math.random, difficulty), over: false }
   }
-  if (!state.over && !handHasFit(state.board, remaining)) {
-    return { ...state, over: true }
+  if (!base.over && !handHasFit(base.board, remaining)) {
+    return { ...base, over: true }
   }
-  return state
+  return base
 }
 
 function copyPiece(piece) {
@@ -44,27 +82,41 @@ export function cloneState(state) {
     score: state.score,
     streak: state.streak,
     best: state.best,
+    bests: copyBests(state),
+    difficulty: state.difficulty || "normal",
+    hintsLeft: state.hintsLeft === undefined ? levelOf(state.difficulty || "normal").hints : state.hintsLeft,
     over: state.over,
     settings: { ...state.settings },
   }
 }
 
-export function createMatch(rng = Math.random, best = 0, settings = defaultSettings()) {
+export function createMatch(rng = Math.random, best = 0, settings = defaultSettings(), difficulty = "normal") {
+  const id = DIFFICULTIES.includes(difficulty) ? difficulty : "normal"
+  const level = levelOf(id)
+  const bests = normalizeBestArg(best, id)
   const board = emptyBoard()
   return {
     board,
-    hand: dealFair(board, rng),
-    preview: dealFair(board, rng),
+    hand: dealHand(board, rng, id),
+    preview: dealHand(board, rng, id),
     score: 0,
     streak: 0,
-    best,
+    best: bests[id] || 0,
+    bests,
+    difficulty: id,
+    hintsLeft: level.hints,
     over: false,
     settings: { ...settings },
   }
 }
 
-export function restartMatch(state, rng = Math.random) {
-  return createMatch(rng, state.best, state.settings)
+export function restartMatch(state, rng = Math.random, difficulty) {
+  const id = DIFFICULTIES.includes(difficulty) ? difficulty : state.difficulty || "normal"
+  const bests = copyBests(state)
+  if (state.difficulty && DIFFICULTIES.includes(state.difficulty)) {
+    bests[state.difficulty] = Math.max(bests[state.difficulty] || 0, state.best || 0)
+  }
+  return createMatch(rng, bests, state.settings, id)
 }
 
 /** Every legal drop for the pieces the player still holds. */
@@ -103,11 +155,14 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
   const linesCleared = lines.rows.length + lines.cols.length
   const cleared = linesCleared > 0 ? lineKeys(lines.rows, lines.cols) : new Set()
   const board = linesCleared > 0 ? clearLines(placed, lines.rows, lines.cols) : placed
+  const difficulty = DIFFICULTIES.includes(state.difficulty) ? state.difficulty : "normal"
+  const level = levelOf(state.difficulty ? difficulty : "normal")
   const scored = scorePlacement({
     cellsPlaced: shape.cells.length,
     linesCleared,
     streak: state.streak,
   })
+  const gained = scored.points * (level.multiplier || 1)
 
   const hand = state.hand.map((item, index) =>
     index === slot ? { ...item, used: true } : { ...item },
@@ -119,20 +174,28 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
   const remaining = hand.filter((item) => !item.used)
 
   if (remaining.length === 0) {
-    const nextHand = ensureFair(board, preview, rng)
+    const nextHand = ensureHand(board, preview, rng, state.difficulty ? difficulty : "normal")
     if (!nextHand) {
       over = true
     } else {
       hand.splice(0, hand.length, ...nextHand)
-      preview = dealFair(board, rng)
+      preview = dealHand(board, rng, state.difficulty ? difficulty : "normal")
       dealt = true
     }
   } else if (!handHasFit(board, remaining)) {
     over = true
   }
 
-  const score = state.score + scored.points
-  const best = Math.max(state.best, score)
+  let hintsLeft = state.hintsLeft
+  if (level.earn && linesCleared > 0 && typeof hintsLeft === "number") {
+    const bonus = linesCleared >= 2 ? 2 : 1
+    hintsLeft = Math.min(level.cap, hintsLeft + bonus)
+  }
+
+  const score = state.score + gained
+  const bests = copyBests(state.bests || state.difficulty ? state : { best: state.best, difficulty: "normal" })
+  const best = Math.max(state.best || 0, score)
+  bests[difficulty] = Math.max(bests[difficulty] || 0, best)
   const next = {
     board,
     hand,
@@ -140,6 +203,9 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
     score,
     streak: scored.streak,
     best,
+    bests,
+    difficulty: state.difficulty,
+    hintsLeft,
     over,
     settings: { ...state.settings, seenHint: true },
   }
@@ -151,10 +217,34 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
     placedKeys: placedKeys(shape, row, col),
     clearedKeys: cleared,
     linesCleared,
-    gained: scored.points,
+    gained,
     breakdown: scored.breakdown,
     dealt,
     gameOver: over,
     newRecord: state.best > 0 && state.score < state.best && score >= state.best,
+  }
+}
+
+/**
+ * Spend one hint (unlimited levels stay unlimited) and return the plan.
+ * Hard shows only the first step. The plan is partial when no no-lose line exists.
+ */
+export function takeHint(state) {
+  const difficulty = DIFFICULTIES.includes(state.difficulty) ? state.difficulty : "normal"
+  const level = levelOf(difficulty)
+  if (level.hintMode === "none") return { ok: false, reason: "off", state }
+  if (state.hintsLeft === 0) return { ok: false, reason: "spent", state }
+  const plan = solve(state.board, state.hand)
+  const hintsLeft = state.hintsLeft == null ? null : Math.max(0, state.hintsLeft - 1)
+  const steps = level.hintMode === "single" ? plan.steps.slice(0, 1) : plan.steps.slice()
+  const next = cloneState(state)
+  next.hintsLeft = hintsLeft
+  return {
+    ok: true,
+    state: next,
+    steps,
+    complete: plan.complete,
+    placed: plan.placed,
+    mode: level.hintMode,
   }
 }
