@@ -51,18 +51,21 @@ export function restoreMatch(state) {
   const level = levelOf(difficulty)
   const bests = copyBests({ ...state, difficulty })
   const hintsLeft = state.hintsLeft === undefined ? level.hints : state.hintsLeft
+  const undosLeft = state.undosLeft === undefined ? level.undos : state.undosLeft
   const base = {
     ...state,
     difficulty,
     bests,
     hintsLeft,
+    undosLeft,
+    undo: state.undo || null,
     best: Math.max(state.best || 0, bests[difficulty] || 0),
   }
   const remaining = base.hand.filter((piece) => !piece.used)
   if (remaining.length === 0) {
     const hand = ensureHand(base.board, base.preview, Math.random, difficulty)
-    if (!hand) return { ...base, over: true }
-    return { ...base, hand, preview: dealHand(base.board, Math.random, difficulty), over: false }
+    if (!hand) return { ...base, over: true, undo: null }
+    return { ...base, hand, preview: dealHand(base.board, Math.random, difficulty), over: false, undo: null }
   }
   if (!base.over && !handHasFit(base.board, remaining)) {
     return { ...base, over: true }
@@ -85,9 +88,48 @@ export function cloneState(state) {
     bests: copyBests(state),
     difficulty: state.difficulty || "normal",
     hintsLeft: state.hintsLeft === undefined ? levelOf(state.difficulty || "normal").hints : state.hintsLeft,
+    undosLeft: state.undosLeft === undefined ? levelOf(state.difficulty || "normal").undos : state.undosLeft,
+    undo: state.undo ? copyUndo(state.undo) : null,
     over: state.over,
     settings: { ...state.settings },
   }
+}
+
+function copyUndo(undo) {
+  if (!undo) return null
+  return {
+    board: undo.board.map((row) => row.slice()),
+    hand: undo.hand.map(copyPiece),
+    preview: undo.preview ? undo.preview.map(copyPiece) : null,
+    score: undo.score,
+    streak: undo.streak,
+    best: undo.best,
+    bests: { ...undo.bests },
+    hintsLeft: undo.hintsLeft,
+    undosLeft: undo.undosLeft,
+  }
+}
+
+function snapshotUndo(state) {
+  return {
+    board: state.board.map((row) => row.slice()),
+    hand: state.hand.map(copyPiece),
+    preview: state.preview ? state.preview.map(copyPiece) : null,
+    score: state.score,
+    streak: state.streak,
+    best: state.best || 0,
+    bests: copyBests(state.bests || state.difficulty ? state : { best: state.best, difficulty: "normal" }),
+    hintsLeft: state.hintsLeft,
+    undosLeft: state.undosLeft,
+  }
+}
+
+function refillUndos(level, undosLeft, linesCleared, streak) {
+  if (typeof undosLeft !== "number" || !level.undoMax) return undosLeft
+  const combo = linesCleared >= 2
+  const streakGrant = linesCleared > 0 && streak > 0 && streak % 3 === 0
+  if (!combo && !streakGrant) return undosLeft
+  return Math.min(level.undoMax, undosLeft + 1)
 }
 
 export function createMatch(rng = Math.random, best = 0, settings = defaultSettings(), difficulty = "normal") {
@@ -105,6 +147,8 @@ export function createMatch(rng = Math.random, best = 0, settings = defaultSetti
     bests,
     difficulty: id,
     hintsLeft: level.hints,
+    undosLeft: level.undos,
+    undo: null,
     over: false,
     settings: { ...settings },
   }
@@ -186,11 +230,14 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
     over = true
   }
 
+  const prior = snapshotUndo(state)
+
   let hintsLeft = state.hintsLeft
   if (level.earn && linesCleared > 0 && typeof hintsLeft === "number") {
     const bonus = linesCleared >= 2 ? 2 : 1
     hintsLeft = Math.min(level.cap, hintsLeft + bonus)
   }
+  const undosLeft = refillUndos(level, state.undosLeft, linesCleared, scored.streak)
 
   const score = state.score + gained
   const bests = copyBests(state.bests || state.difficulty ? state : { best: state.best, difficulty: "normal" })
@@ -206,6 +253,8 @@ export function placePiece(state, slot, row, col, rng = Math.random) {
     bests,
     difficulty: state.difficulty,
     hintsLeft,
+    undosLeft,
+    undo: prior,
     over,
     settings: { ...state.settings, seenHint: true },
   }
@@ -239,6 +288,7 @@ export function takeHint(state) {
   const steps = level.hintMode === "single" ? plan.steps.slice(0, 1) : plan.steps.slice()
   const next = cloneState(state)
   next.hintsLeft = hintsLeft
+  if (next.undo) next.undo = { ...next.undo, hintsLeft }
   return {
     ok: true,
     state: next,
@@ -247,4 +297,42 @@ export function takeHint(state) {
     placed: plan.placed,
     mode: level.hintMode,
   }
+}
+
+/**
+ * Revert the most recent placement. The piece set and preview come back
+ * unchanged. A refill granted by that move is dropped, and the undo itself
+ * is spent, so the action cannot be farmed. Not available after game over.
+ */
+export function undoMove(state) {
+  const difficulty = DIFFICULTIES.includes(state.difficulty) ? state.difficulty : "normal"
+  const level = levelOf(difficulty)
+  if (state.over) return { ok: false, reason: "over", state }
+  if (level.undoMax === 0) return { ok: false, reason: "off", state }
+  if (state.undosLeft === 0) return { ok: false, reason: "spent", state }
+  if (!state.undo || !state.undo.board || !state.undo.hand) return { ok: false, reason: "empty", state }
+
+  const prior = state.undo
+  const hintsLeft =
+    typeof state.hintsLeft === "number" && typeof prior.hintsLeft === "number"
+      ? Math.min(state.hintsLeft, prior.hintsLeft)
+      : prior.hintsLeft
+  const undosLeft = state.undosLeft == null ? null : Math.max(0, (prior.undosLeft ?? 0) - 1)
+  const bests = copyBests({ bests: prior.bests })
+  const next = {
+    board: prior.board.map((row) => row.slice()),
+    hand: prior.hand.map(copyPiece),
+    preview: prior.preview ? prior.preview.map(copyPiece) : null,
+    score: prior.score,
+    streak: prior.streak,
+    best: prior.best,
+    bests,
+    difficulty: state.difficulty,
+    hintsLeft,
+    undosLeft,
+    undo: null,
+    over: false,
+    settings: { ...state.settings },
+  }
+  return { ok: true, state: next }
 }

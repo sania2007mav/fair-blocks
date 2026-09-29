@@ -10,13 +10,15 @@
  * function requestSupportPurchase() {}
  */
 
-import { createMatch, restartMatch, placePiece, restoreMatch, takeHint } from "./game.js"
-import { loadGame, saveGame } from "./storage.js"
+import { createMatch, restartMatch, placePiece, restoreMatch, takeHint, undoMove } from "./game.js"
+import { loadGame, saveGame, loadProfile, saveProfile } from "./storage.js"
 import { createAudio } from "./audio.js"
 import { THEMES, LANGS, DIFFICULTIES, levelOf } from "./config.js"
 import { translate } from "./i18n.js"
+import { validateName } from "./names.js"
 import { solve } from "./solver.js"
 import { dealHand } from "./generator.js"
+import * as online from "./online.js"
 import {
   initView,
   render,
@@ -30,6 +32,10 @@ import {
   setSettingsOpen,
   setConfirmOpen,
   setPickerOpen,
+  setNameOpen,
+  setNameHint,
+  setLeaderOpen,
+  renderLeaderboard,
   syncPicker,
   paintPlan,
   clearPlan,
@@ -53,6 +59,12 @@ let pickerSelection = state.difficulty || "normal"
 let confirmKind = null
 let pendingDifficulty = null
 let idleTimer = 0
+let profile = loadProfile()
+let uid = null
+let nameTimer = 0
+let nameToken = 0
+let lbLevel = state.difficulty || "normal"
+let leaderOpen = false
 
 function wait(ms) {
   if (prefersReducedMotion() || ms <= 0) return Promise.resolve()
@@ -184,6 +196,7 @@ async function resolveDrop(result) {
   }
   busy = false
   armAutoHint()
+  if (result.gameOver) void offerScore()
 }
 
 function onDrop(slot, row, col, valid) {
@@ -283,6 +296,197 @@ function confirmYes() {
   begin(difficulty)
 }
 
+function queuePending(level, score) {
+  if (!profile.pending || profile.pending.level !== level || score > profile.pending.score) {
+    profile = { ...profile, pending: { level, score } }
+    saveProfile(profile)
+  }
+}
+
+async function sendScore(level, score) {
+  if (!profile.name || score <= 0) return
+  const known = profile.onlineBest[level] || 0
+  if (score <= known) return
+  if (!uid || !online.onlineNow()) {
+    queuePending(level, score)
+    return
+  }
+  const result = await online.submitScore(uid, profile.name, level, score, known)
+  if (result.ok) {
+    profile.onlineBest[level] = result.best
+    if (profile.pending && profile.pending.level === level) profile.pending = null
+    saveProfile(profile)
+  } else if (result.code === "offline") {
+    queuePending(level, score)
+  } else if (typeof result.best === "number") {
+    profile.onlineBest[level] = Math.max(known, result.best)
+    saveProfile(profile)
+  }
+}
+
+async function flushPending() {
+  const pending = profile.pending
+  if (!pending || !profile.name) return
+  await sendScore(pending.level, pending.score)
+}
+
+async function bootOnline() {
+  try {
+    const user = await online.ensureUser()
+    if (!user) return
+    uid = user.uid
+    if (!profile.name) {
+      const remote = await online.fetchPlayerName(uid)
+      if (remote && remote.name) {
+        profile = { ...profile, name: remote.name, nameLower: remote.nameLower || "" }
+        saveProfile(profile)
+      }
+    }
+    await flushPending()
+  } catch {
+    /* Offline or a blocked CDN: play continues. */
+  }
+}
+
+function openNameModal() {
+  const input = document.getElementById("name-input")
+  input.value = ""
+  setNameHint("", false)
+  document.getElementById("name-save").disabled = true
+  setNameOpen(true)
+  input.focus()
+}
+
+function closeNameModal() {
+  nameToken++
+  clearTimeout(nameTimer)
+  setNameOpen(false)
+}
+
+async function offerScore() {
+  const level = state.difficulty || "normal"
+  const score = state.score
+  if (score <= 0) return
+  if (profile.name) {
+    await sendScore(level, score)
+    return
+  }
+  if (!online.onlineNow()) {
+    queuePending(level, score)
+    return
+  }
+  if (profile.skip && profile.skip.level === level && score <= profile.skip.score) return
+  if (!uid) await bootOnline()
+  if (profile.name) {
+    await sendScore(level, score)
+    return
+  }
+  if (!uid) {
+    queuePending(level, score)
+    return
+  }
+  openNameModal()
+}
+
+function onNameInput() {
+  const input = document.getElementById("name-input")
+  const save = document.getElementById("name-save")
+  const check = validateName(input.value)
+  save.disabled = true
+  if (!input.value.trim()) {
+    setNameHint("", false)
+    return
+  }
+  if (!check.ok) {
+    setNameHint(translate(state.settings.lang, "nameInvalid"), true)
+    return
+  }
+  setNameHint("", false)
+  const token = ++nameToken
+  clearTimeout(nameTimer)
+  nameTimer = setTimeout(async () => {
+    let taken = null
+    try {
+      taken = await online.isNameTaken(check.nameLower)
+    } catch {
+      taken = null
+    }
+    if (token !== nameToken) return
+    if (taken) {
+      setNameHint(translate(state.settings.lang, "nameTaken"), true)
+      save.disabled = true
+    } else if (taken === false) {
+      save.disabled = true
+      if (validateName(input.value).nameLower === check.nameLower) save.disabled = false
+    } else {
+      setNameHint(translate(state.settings.lang, "noNetwork"), true)
+    }
+  }, 400)
+}
+
+async function saveName() {
+  const check = validateName(document.getElementById("name-input").value)
+  if (!check.ok || !uid) return
+  document.getElementById("name-save").disabled = true
+  const result = await online.claimName(uid, check.name)
+  if (!result.ok) {
+    setNameHint(translate(state.settings.lang, result.code === "taken" ? "nameTaken" : "noNetwork"), true)
+    return
+  }
+  profile = { ...profile, name: result.name, nameLower: result.nameLower, skip: null }
+  saveProfile(profile)
+  closeNameModal()
+  await sendScore(state.difficulty || "normal", state.score)
+}
+
+function skipName() {
+  profile = { ...profile, skip: { level: state.difficulty || "normal", score: state.score } }
+  saveProfile(profile)
+  closeNameModal()
+}
+
+async function refreshBoard() {
+  const lang = state.settings.lang
+  renderLeaderboard(lang, lbLevel, { status: "loading" })
+  if (!online.onlineNow()) {
+    renderLeaderboard(lang, lbLevel, { status: "offline" })
+    return
+  }
+  if (!uid) await bootOnline()
+  const data = await online.loadLeaderboard(lbLevel, uid)
+  if (!data.ok) {
+    renderLeaderboard(lang, lbLevel, { status: "offline" })
+    return
+  }
+  if (data.rows.length === 0) {
+    renderLeaderboard(lang, lbLevel, { status: "empty" })
+    return
+  }
+  renderLeaderboard(lang, lbLevel, { status: "ready", rows: data.rows, place: data.place })
+}
+
+function openLeaderboard() {
+  lbLevel = state.difficulty || "normal"
+  leaderOpen = true
+  setLeaderOpen(true)
+  refreshBoard()
+}
+
+function closeLeaderboard() {
+  leaderOpen = false
+  setLeaderOpen(false)
+}
+
+function doUndo() {
+  const result = undoMove(state)
+  if (!result.ok) return
+  dismissPlan()
+  state = result.state
+  persist()
+  show()
+  audio.playTap()
+}
+
 function confirmNo() {
   confirmKind = null
   pendingDifficulty = null
@@ -365,9 +569,37 @@ function bind() {
   })
   document.getElementById("confirm-yes").addEventListener("click", confirmYes)
   document.getElementById("confirm-no").addEventListener("click", confirmNo)
+  document.getElementById("btn-undo").addEventListener("click", () => {
+    audio.unlock()
+    doUndo()
+  })
+  document.getElementById("btn-leaderboard").addEventListener("click", () => {
+    audio.unlock()
+    audio.playTap()
+    openLeaderboard()
+  })
+  document.getElementById("lb-close").addEventListener("click", closeLeaderboard)
+  document.getElementById("lb-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-lb]")
+    if (!button || !DIFFICULTIES.includes(button.dataset.lb)) return
+    lbLevel = button.dataset.lb
+    audio.playTap()
+    refreshBoard()
+  })
+  document.getElementById("name-input").addEventListener("input", onNameInput)
+  document.getElementById("name-save").addEventListener("click", () => saveName())
+  document.getElementById("name-skip").addEventListener("click", skipName)
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return
+    if (document.getElementById("name-modal").classList.contains("open")) {
+      skipName()
+      return
+    }
+    if (leaderOpen) {
+      closeLeaderboard()
+      return
+    }
     if (document.getElementById("confirm").classList.contains("open")) {
       confirmNo()
       return
@@ -383,6 +615,9 @@ function bind() {
 
   window.addEventListener("pointerdown", () => armAutoHint())
 
+  window.addEventListener("online", () => {
+    bootOnline()
+  })
   window.addEventListener("pointerdown", () => audio.unlock(), { once: true })
   window.addEventListener("resize", fitBoard)
   window.addEventListener("orientationchange", () => setTimeout(fitBoard, 60))
@@ -407,6 +642,7 @@ initView()
 bind()
 if (pickerOpen) setPickerOpen(true)
 show()
+bootOnline()
 registerWorker()
 
 if (location.hash === "#debug") {
@@ -423,7 +659,10 @@ if (location.hash === "#debug") {
     takeHint,
     solve,
     dealHand,
+    undoMove,
     isBusy: () => busy,
     revealHint,
+    getProfile: () => profile,
+    offerScore,
   }
 }

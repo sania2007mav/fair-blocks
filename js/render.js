@@ -267,6 +267,24 @@ export function syncChrome(state) {
     hintBtn.removeAttribute("title")
     badge.textContent = state.hintsLeft == null ? "∞" : String(state.hintsLeft)
   }
+  const undoBtn = $("btn-undo")
+  const undoBadge = $("undo-count")
+  setText("btn-undo-label", t("undo"))
+  undoBtn.setAttribute("aria-label", t("undo"))
+  if (level.undoMax === 0) {
+    undoBtn.hidden = true
+  } else {
+    undoBtn.hidden = false
+    undoBadge.hidden = false
+    undoBadge.textContent = state.undosLeft == null ? "∞" : String(state.undosLeft ?? 0)
+    undoBtn.disabled = Boolean(state.over) || state.undosLeft === 0 || !state.undo
+  }
+  $("btn-leaderboard").setAttribute("aria-label", t("leaderboard"))
+  setText("name-title", t("enterName"))
+  setText("name-skip", t("skip"))
+  setText("name-save", t("save"))
+  setText("lb-title", t("leaderboard"))
+  setText("lb-close", t("close"))
   setText("diff-label", t("difficulty"))
   syncDiffChips(state, t)
   setText("board-caption", t("boardLabel"))
@@ -455,6 +473,84 @@ export function syncPicker(state, selected) {
     blurb.textContent = t(BLURBS[id])
     button.append(name, best, blurb)
     root.appendChild(button)
+  }
+}
+
+export function setNameOpen(open) {
+  const el = $("name-modal")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function setNameHint(text, bad) {
+  const el = $("name-hint")
+  el.textContent = text || ""
+  el.classList.toggle("warn", Boolean(bad))
+}
+
+export function setLeaderOpen(open) {
+  const el = $("leaderboard")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function renderLeaderboard(lang, level, view) {
+  const t = (key) => translate(lang, key)
+  setText("lb-title", t("leaderboard"))
+  setText("lb-close", t("close"))
+  const tabs = $("lb-tabs")
+  if (tabs.childElementCount === 0) {
+    for (const id of DIFFICULTIES) {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.dataset.lb = id
+      tabs.appendChild(button)
+    }
+  }
+  for (const button of tabs.querySelectorAll("[data-lb]")) {
+    button.textContent = t(DIFF_NAMES[button.dataset.lb] || button.dataset.lb)
+    button.setAttribute("aria-pressed", button.dataset.lb === level ? "true" : "false")
+  }
+  const status = $("lb-status")
+  const list = $("lb-list")
+  const place = $("lb-place")
+  list.replaceChildren()
+  place.hidden = true
+  if (!view || view.status === "loading") {
+    status.hidden = false
+    status.textContent = t("loading")
+    return
+  }
+  if (view.status === "offline") {
+    status.hidden = false
+    status.textContent = t("noNetwork")
+    return
+  }
+  if (!view.rows || view.rows.length === 0) {
+    status.hidden = false
+    status.textContent = t("noRecords")
+    return
+  }
+  status.hidden = true
+  status.textContent = ""
+  for (const row of view.rows) {
+    const el = document.createElement("div")
+    el.className = "lb-row" + (row.mine ? " mine" : "")
+    const rank = document.createElement("span")
+    rank.className = "lb-rank"
+    rank.textContent = String(row.rank)
+    const name = document.createElement("span")
+    name.className = "lb-name"
+    name.textContent = row.name
+    const score = document.createElement("span")
+    score.className = "lb-score"
+    score.textContent = String(row.score)
+    el.append(rank, name, score)
+    list.appendChild(el)
+  }
+  if (view.place) {
+    place.hidden = false
+    place.textContent = t("yourPlace") + ": " + view.place.rank + " · " + view.place.score
   }
 }
 

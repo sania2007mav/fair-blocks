@@ -23,6 +23,7 @@
         <h1 id="title">Честные блоки</h1>
       </div>
       <div class="top-actions">
+        <button id="btn-leaderboard" class="icon-btn" type="button" aria-label="Таблица рекордов">🏆</button>
         <button id="btn-sound" class="icon-btn" type="button" aria-pressed="true" aria-label="Выключить звук">
           <svg class="icon icon-on" viewBox="0 0 24 24" aria-hidden="true">
             <path fill="currentColor" d="M4 9h3.2L12 5.2v13.6L7.2 15H4V9zm11.2 3a3.2 3.2 0 0 0-1.7-2.8v5.6A3.2 3.2 0 0 0 15.2 12zm-1.7-6.3v1.7a5.3 5.3 0 0 1 0 9.2v1.7a7 7 0 0 0 0-12.6z"/>
@@ -83,6 +84,10 @@
     <section id="tray" class="tray"></section>
 
     <footer class="footer">
+      <button id="btn-undo" class="btn undo-btn" type="button">
+        <span id="btn-undo-label">Отменить</span>
+        <span id="undo-count" class="count">3</span>
+      </button>
       <button id="btn-hint" class="btn hint-btn" type="button">
         <span id="btn-hint-label">Подсказка</span>
         <span id="hint-count" class="count">3</span>
@@ -143,6 +148,29 @@
           <button id="confirm-no" class="btn" type="button">Нет</button>
           <button id="confirm-yes" class="btn primary" type="button">Да</button>
         </div>
+      </div>
+    </div>
+
+    <div id="name-modal" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="name-title">
+      <div class="card">
+        <h2 id="name-title">Введите имя для таблицы рекордов</h2>
+        <input id="name-input" class="name-input" type="text" maxlength="24" autocomplete="nickname" enterkeyhint="done">
+        <p id="name-hint" class="note"></p>
+        <div class="confirm-actions">
+          <button id="name-skip" class="btn" type="button">Пропустить</button>
+          <button id="name-save" class="btn primary" type="button" disabled>Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="leaderboard" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="lb-title">
+      <div class="card lb-card">
+        <h2 id="lb-title">Таблица рекордов</h2>
+        <div id="lb-tabs" class="lb-tabs" role="tablist"></div>
+        <p id="lb-status" class="note"></p>
+        <div id="lb-list" class="lb-list"></div>
+        <p id="lb-place" class="lb-place" hidden></p>
+        <button id="lb-close" class="btn" type="button">Закрыть</button>
       </div>
     </div>
 

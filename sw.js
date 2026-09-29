@@ -2,7 +2,7 @@
  * Offline shell. Network-first while online, cache fallback when not.
  * Bump CACHE when a breaking change should drop old precached files.
  */
-const CACHE = "chestnye-bloki-v2"
+const CACHE = "chestnye-bloki-v3"
 const ASSETS = [
   "./",
   "./index.html",
@@ -14,6 +14,9 @@ const ASSETS = [
   "./js/scoring.js",
   "./js/generator.js",
   "./js/solver.js",
+  "./js/names.js",
+  "./js/firebase-config.js",
+  "./js/online.js",
   "./js/game.js",
   "./js/storage.js",
   "./js/i18n.js",
@@ -46,6 +49,9 @@ self.addEventListener("fetch", (event) => {
   const request = event.request
   if (request.method !== "GET") return
   const url = new URL(request.url)
+  if (url.hostname.endsWith("gstatic.com") || url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("firebaseapp.com")) {
+    return
+  }
   if (url.origin !== self.location.origin) return
 
   event.respondWith(

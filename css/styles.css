@@ -447,16 +447,104 @@ button {
   min-width: 0;
 }
 
-.footer .btn { flex: 1; }
+.footer .btn {
+  flex: 1;
+  font-size: 0.78rem;
+  padding: 8px 4px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
 
-.hint-btn {
+.hint-btn,
+.undo-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 4px;
 }
 
-.hint-btn:disabled { opacity: 0.45; }
+.footer .undo-btn {
+  flex-direction: column;
+  gap: 2px;
+  white-space: normal;
+  font-size: 0.68rem;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.hint-btn:disabled,
+.undo-btn:disabled { opacity: 0.45; }
+
+.name-input {
+  width: 100%;
+  border-radius: 12px;
+  border: 0;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+
+.lb-card {
+  width: min(100%, 360px);
+  max-height: min(92dvh, 760px);
+  text-align: left;
+}
+
+.lb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lb-tabs button {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  font-weight: 800;
+  font-size: 0.78rem;
+}
+
+.lb-tabs button[aria-pressed="true"] {
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46dvh;
+  overflow: auto;
+}
+
+.lb-row {
+  display: grid;
+  grid-template-columns: 2.4em 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  font-weight: 700;
+}
+
+.lb-row.mine {
+  outline: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.lb-rank { color: var(--muted); }
+.lb-score { font-variant-numeric: tabular-nums; }
+
+.lb-place {
+  font-weight: 800;
+  text-align: center;
+}
+
+#name-modal { z-index: 40; }
 
 .count {
   min-width: 1.5em;
@@ -592,6 +680,8 @@ body.dragging { cursor: grabbing; }
 }
 
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.note.warn { color: var(--danger); }
 
 .note {
   color: var(--muted);

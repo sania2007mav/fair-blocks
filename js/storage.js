@@ -1,6 +1,6 @@
 /** localStorage save/load. `deserialize` is pure so tests can round-trip JSON. */
 
-import { SIZE, STORAGE_KEY, THEMES, LANGS, COLOR_COUNT, DIFFICULTIES, defaultSettings, emptyBests, levelOf } from "./config.js"
+import { SIZE, STORAGE_KEY, PROFILE_KEY, THEMES, LANGS, COLOR_COUNT, DIFFICULTIES, defaultSettings, emptyBests, levelOf } from "./config.js"
 import { getShape } from "./pieces.js"
 
 function isBoard(board) {
@@ -56,6 +56,33 @@ function readHints(value, difficulty) {
   return levelOf(difficulty).hints
 }
 
+function readUndos(value, difficulty) {
+  if (value === null) return null
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value)
+  return levelOf(difficulty).undos
+}
+
+function readUndo(raw) {
+  if (!raw || typeof raw !== "object") return null
+  if (!isBoard(raw.board) || !isHand(raw.hand)) return null
+  if (raw.preview != null && !isHand(raw.preview)) return null
+  const bests = emptyBests()
+  if (raw.bests && typeof raw.bests === "object") {
+    for (const id of DIFFICULTIES) bests[id] = readNumber(raw.bests[id])
+  }
+  return {
+    board: raw.board.map((row) => row.slice()),
+    hand: raw.hand.map((piece) => ({ ...piece })),
+    preview: raw.preview ? raw.preview.map((piece) => ({ ...piece })) : null,
+    score: readNumber(raw.score),
+    streak: readNumber(raw.streak),
+    best: readNumber(raw.best),
+    bests,
+    hintsLeft: raw.hintsLeft === null ? null : raw.hintsLeft === undefined ? undefined : readNumber(raw.hintsLeft),
+    undosLeft: raw.undosLeft === null ? null : raw.undosLeft === undefined ? undefined : readNumber(raw.undosLeft),
+  }
+}
+
 /** @returns {{ state: object | null, best: number }} */
 export function deserialize(raw) {
   let data = raw
@@ -84,6 +111,8 @@ export function deserialize(raw) {
     bests,
     difficulty,
     hintsLeft: readHints(data.hintsLeft, difficulty),
+    undosLeft: readUndos(data.undosLeft, difficulty),
+    undo: readUndo(data.undo),
     over: Boolean(data.over),
     settings: readSettings(data.settings),
   }
@@ -113,5 +142,39 @@ export function saveGame(state) {
     localStorage.setItem(STORAGE_KEY, serialize(state))
   } catch {
     /* Private mode or a full disk: the match still runs, it just won't resume. */
+  }
+}
+
+export function emptyProfile() {
+  return { name: "", nameLower: "", onlineBest: emptyBests(), pending: null, skip: null }
+}
+
+export function loadProfile() {
+  const profile = emptyProfile()
+  try {
+    const raw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "null")
+    if (!raw || typeof raw !== "object") return profile
+    if (typeof raw.name === "string") profile.name = raw.name
+    if (typeof raw.nameLower === "string") profile.nameLower = raw.nameLower
+    if (raw.onlineBest && typeof raw.onlineBest === "object") {
+      for (const id of DIFFICULTIES) profile.onlineBest[id] = readNumber(raw.onlineBest[id])
+    }
+    if (raw.pending && DIFFICULTIES.includes(raw.pending.level)) {
+      profile.pending = { level: raw.pending.level, score: readNumber(raw.pending.score) }
+    }
+    if (raw.skip && DIFFICULTIES.includes(raw.skip.level)) {
+      profile.skip = { level: raw.skip.level, score: readNumber(raw.skip.score) }
+    }
+  } catch {
+    return emptyProfile()
+  }
+  return profile
+}
+
+export function saveProfile(profile) {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile))
+  } catch {
+    /* The match still runs without a cached name. */
   }
 }

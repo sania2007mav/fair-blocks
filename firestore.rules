@@ -1,0 +1,163 @@
+rules_version = '2';
+
+// ===============================================================
+// «Честные блоки» — global leaderboard. Prototype rules; review
+// before a wide launch.
+// ===============================================================
+//
+// Assumed Data Model
+//
+// Collection: names            (public get, no list)
+// Document ID: nameLower       (normalized name, name.toLowerCase())
+// Fields:
+//   - uid:       string (required, == request.auth.uid, immutable)
+//   - name:      string (required, 2..16 chars, see isValidName)
+//   - createdAt: timestamp (required, == request.time)
+// Create-only. Never updated or deleted, so a name cannot be stolen,
+// renamed away or freed by anyone.
+//
+// Collection: players          (owner get only, no list)
+// Document ID: uid             (Firebase Auth uid, anonymous)
+// Fields:
+//   - name:      string (required, valid name)
+//   - nameLower: string (required, == nameKey(name) == name.toLowerCase())
+// Create-only, one name per uid, written in the SAME batch or
+// transaction as names/{nameLower}; each side checks the other with
+// getAfter().
+//
+// Collection: scores/{level}/entries   (public read: get, list, count)
+// level ∈ veryEasy | easy | normal | hard | expert
+// Document ID: uid
+// Fields:
+//   - uid:       string (required, == document id == request.auth.uid)
+//   - name:      string (required, == players/{uid}.name)
+//   - score:     int (required, 0..10,000,000; only increases)
+//   - updatedAt: timestamp (required, == request.time)
+// Never deleted.
+//
+// Everything else: denied.
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function hasExactly(fields) {
+      return incoming().keys().hasAll(fields) && incoming().keys().hasOnly(fields);
+    }
+
+    function uidUnchanged() {
+      return incoming().uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return incoming().uid == resource.data.uid;
+    }
+
+    // 2..16 chars: Latin letters, Russian + Kazakh Cyrillic (Ә Ғ Қ Ң Ө Ұ Ү Һ І,
+    // plus Ukrainian/Belarusian Є Ї Ґ Ў), digits, space, _ and -.
+    // No leading/trailing space and no double spaces.
+    function isValidName(n) {
+      return n is string
+        && n.size() <= 64   // cheap DoS guard; the regex enforces 2..16 chars
+        && n.matches('[A-Za-z0-9А-яЁёӘәҒғҚқҢңӨөҰұҮүҺһІіЄєЇїҐґЎў_-][A-Za-z0-9А-яЁёӘәҒғҚқҢңӨөҰұҮүҺһІіЄєЇїҐґЎў _-]{0,14}[A-Za-z0-9А-яЁёӘәҒғҚқҢңӨөҰұҮүҺһІіЄєЇїҐґЎў_-]')
+        && !n.matches('.*  .*');
+    }
+
+    // Case-folding key for uniqueness. String.lower() in rules only folds
+    // ASCII, so the allowed Cyrillic capitals are folded explicitly. This is
+    // identical to JavaScript's name.toLowerCase() for every allowed char.
+    function nameKey(n) {
+      return n.lower().replace('А', 'а').replace('Б', 'б').replace('В', 'в').replace('Г', 'г').replace('Д', 'д').replace('Е', 'е').replace('Ё', 'ё').replace('Ж', 'ж').replace('З', 'з').replace('И', 'и').replace('Й', 'й').replace('К', 'к').replace('Л', 'л').replace('М', 'м').replace('Н', 'н').replace('О', 'о').replace('П', 'п').replace('Р', 'р').replace('С', 'с').replace('Т', 'т').replace('У', 'у').replace('Ф', 'ф').replace('Х', 'х').replace('Ц', 'ц').replace('Ч', 'ч').replace('Ш', 'ш').replace('Щ', 'щ').replace('Ъ', 'ъ').replace('Ы', 'ы').replace('Ь', 'ь').replace('Э', 'э').replace('Ю', 'ю').replace('Я', 'я').replace('Ә', 'ә').replace('Ғ', 'ғ').replace('Қ', 'қ').replace('Ң', 'ң').replace('Ө', 'ө').replace('Ұ', 'ұ').replace('Ү', 'ү').replace('Һ', 'һ').replace('І', 'і').replace('Є', 'є').replace('Ї', 'ї').replace('Ґ', 'ґ').replace('Ў', 'ў');
+    }
+
+    function isValidLevel(level) {
+      return level in ['veryEasy', 'easy', 'normal', 'hard', 'expert'];
+    }
+
+    function playerAfter(uid) {
+      return getAfter(/databases/$(database)/documents/players/$(uid));
+    }
+
+    function nameAfter(nameLower) {
+      return getAfter(/databases/$(database)/documents/names/$(nameLower));
+    }
+
+    // ---------- Domain validators ----------
+    function isValidNameClaim(nameLower) {
+      return hasExactly(['uid', 'name', 'createdAt'])
+        && uidUnchanged()
+        && isValidName(incoming().name)
+        && nameKey(incoming().name) == nameLower
+        && incoming().createdAt == request.time
+        // The same batch must create players/{uid} pointing at this name.
+        && existsAfter(/databases/$(database)/documents/players/$(request.auth.uid))
+        && playerAfter(request.auth.uid).data.nameLower == nameLower;
+    }
+
+    function isValidPlayer(uid) {
+      return hasExactly(['name', 'nameLower'])
+        && isValidName(incoming().name)
+        && incoming().nameLower is string
+        && incoming().nameLower == nameKey(incoming().name)
+        // The same batch must create names/{nameLower} owned by this uid.
+        && !exists(/databases/$(database)/documents/names/$(incoming().nameLower))
+        && existsAfter(/databases/$(database)/documents/names/$(incoming().nameLower))
+        && nameAfter(incoming().nameLower).data.uid == uid;
+    }
+
+    function isValidScore(uid) {
+      return hasExactly(['uid', 'name', 'score', 'updatedAt'])
+        && uidUnchanged()
+        && incoming().uid == uid
+        && incoming().score is int
+        && incoming().score >= 0
+        && incoming().score <= 10000000
+        && incoming().updatedAt == request.time
+        && incoming().name is string
+        && existsAfter(/databases/$(database)/documents/players/$(uid))
+        && incoming().name == playerAfter(uid).data.name;
+    }
+
+    // ---------- Collections ----------
+    match /names/{nameLower} {
+      allow get: if true;                 // live "name taken?" check
+      allow list: if false;
+      allow create: if isAuthenticated() && isValidNameClaim(nameLower);
+      allow update, delete: if false;
+    }
+
+    match /players/{uid} {
+      allow get: if isOwner(uid);         // restore own name on reinstall
+      allow list: if false;
+      allow create: if isOwner(uid) && isValidPlayer(uid);
+      allow update, delete: if false;
+    }
+
+    match /scores/{level}/entries/{uid} {
+      allow read: if isValidLevel(level); // public leaderboards
+      allow create: if isOwner(uid) && isValidLevel(level) && isValidScore(uid);
+      allow update: if isOwner(uid) && isValidLevel(level) && isValidScore(uid)
+        && uidNotModified()
+        && incoming().score > resource.data.score;
+      allow delete: if false;
+    }
+
+    // Default deny for everything else (including scores/{level} itself).
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
