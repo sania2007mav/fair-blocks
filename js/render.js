@@ -1,0 +1,634 @@
+/** DOM view. Reads state, never changes rules. */
+
+import { SIZE, DIFFICULTIES, levelOf } from "./config.js"
+import { getShape } from "./pieces.js"
+import { pieceFits } from "./generator.js"
+import { translate, floatCaption } from "./i18n.js"
+
+const $ = (id) => document.getElementById(id)
+
+const ui = {
+  app: null,
+  board: null,
+  cells: [],
+  tray: null,
+  preview: null,
+  previewSection: null,
+  ghost: null,
+}
+
+let lastScore = null
+
+export function initView() {
+  ui.app = $("app")
+  ui.board = $("board")
+  ui.tray = $("tray")
+  ui.preview = $("preview")
+  ui.previewSection = $("preview-section")
+  ui.ghost = $("ghost")
+  ui.board.replaceChildren()
+  ui.cells = []
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const cell = document.createElement("div")
+      cell.className = "cell"
+      cell.dataset.r = String(r)
+      cell.dataset.c = String(c)
+      cell.dataset.color = "0"
+      ui.board.appendChild(cell)
+      ui.cells.push(cell)
+    }
+  }
+  fitBoard()
+  const wrap = document.querySelector(".board-wrap")
+  if (wrap && window.ResizeObserver) {
+    new ResizeObserver(() => fitBoard()).observe(wrap)
+  }
+}
+
+export function fitBoard() {
+  const wrap = document.querySelector(".board-wrap")
+  if (!wrap || !ui.board) return
+  const size = Math.floor(Math.min(wrap.clientWidth, wrap.clientHeight))
+  if (size < 32) return
+  if (Math.abs(ui.board.clientWidth - size) < 2 && Math.abs(ui.board.clientHeight - size) < 2) return
+  ui.board.style.width = size + "px"
+  ui.board.style.height = size + "px"
+}
+
+function fillCell(el, color, fresh) {
+  el.dataset.color = String(color)
+  el.replaceChildren()
+  if (!color) return
+  const block = document.createElement("div")
+  block.className = "block p" + color + (fresh ? " fresh" : "")
+  el.appendChild(block)
+}
+
+export function syncBoard(board, { fresh = new Set(), clearing = new Set() } = {}) {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const el = ui.cells[r * SIZE + c]
+      const color = board[r][c]
+      const key = r + "," + c
+      const wantFresh = fresh.has(key) && color !== 0
+      if (el.dataset.color !== String(color) || (wantFresh && !el.querySelector(".fresh"))) {
+        fillCell(el, color, wantFresh)
+      }
+      el.classList.toggle("clearing", clearing.has(key))
+    }
+  }
+}
+
+export function clearHints() {
+  for (const cell of ui.cells) {
+    cell.classList.remove("hint", "bad", "glow")
+    cell.style.removeProperty("--hint")
+  }
+}
+
+/** @param {Map<string, "hint" | "bad" | "glow">} marks */
+export function paintHints(marks, color) {
+  clearHints()
+  if (!marks) return
+  const hint = "var(--p" + color + ")"
+  for (const [key, kind] of marks) {
+    const [r, c] = key.split(",").map(Number)
+    const el = ui.cells[r * SIZE + c]
+    if (!el) continue
+    if (kind === "hint") {
+      el.classList.add("hint")
+      el.style.setProperty("--hint", hint)
+    } else if (kind === "bad") {
+      el.classList.add("bad")
+    } else if (kind === "glow") {
+      el.classList.add("glow")
+      if (!el.querySelector(".block")) {
+        el.classList.add("hint")
+        el.style.setProperty("--hint", hint)
+      }
+    }
+  }
+}
+
+export function boardMetrics() {
+  const first = ui.cells[0]
+  const right = ui.cells[1]
+  const below = ui.cells[SIZE]
+  if (!first || !right || !below) return null
+  const a = first.getBoundingClientRect()
+  const b = right.getBoundingClientRect()
+  const d = below.getBoundingClientRect()
+  return {
+    originX: a.left,
+    originY: a.top,
+    cell: a.width,
+    strideX: b.left - a.left,
+    strideY: d.top - a.top,
+    board: ui.board.getBoundingClientRect(),
+  }
+}
+
+export function pointToCell(metrics, x, y) {
+  const c = Math.round((x - metrics.originX - metrics.cell / 2) / metrics.strideX)
+  const r = Math.round((y - metrics.originY - metrics.cell / 2) / metrics.strideY)
+  return { r, c }
+}
+
+function buildPiece(shape, color, cellPx, gapPx) {
+  const el = document.createElement("div")
+  el.className = "piece"
+  el.style.gridTemplateColumns = "repeat(" + shape.cols + ", " + cellPx + "px)"
+  el.style.gridTemplateRows = "repeat(" + shape.rows + ", " + cellPx + "px)"
+  el.style.gap = gapPx + "px"
+  const filled = new Set(shape.cells.map(([r, c]) => r + "," + c))
+  for (let r = 0; r < shape.rows; r++) {
+    for (let c = 0; c < shape.cols; c++) {
+      const spot = document.createElement("div")
+      if (filled.has(r + "," + c)) {
+        spot.className = "block p" + color
+      } else {
+        spot.className = "spacer"
+      }
+      el.appendChild(spot)
+    }
+  }
+  return el
+}
+
+function cellPxFor(shape, slotPx, cap) {
+  const side = Math.max(shape.rows, shape.cols)
+  return Math.max(8, Math.min(cap, Math.floor((slotPx - 16) / side)))
+}
+
+export function syncTray(state) {
+  const lang = state.settings.lang
+  const slotPx = ui.tray.offsetWidth > 0 ? (ui.tray.offsetWidth - 16) / 3 : 110
+  ui.tray.replaceChildren()
+  state.hand.forEach((piece, index) => {
+    const slot = document.createElement("div")
+    slot.className = "slot"
+    slot.dataset.slot = String(index)
+    slot.setAttribute("role", "button")
+    slot.setAttribute("aria-label", translate(lang, "piece") + " " + (index + 1))
+    if (piece.used) {
+      slot.classList.add("used")
+      slot.setAttribute("aria-hidden", "true")
+    } else {
+      const shape = getShape(piece.shapeId)
+      const px = cellPxFor(shape, slotPx, 28)
+      slot.appendChild(buildPiece(shape, piece.color, px, 3))
+      if (state.over && !pieceFits(state.board, piece)) slot.classList.add("nofit")
+    }
+    ui.tray.appendChild(slot)
+  })
+  ui.tray.style.pointerEvents = state.over ? "none" : ""
+}
+
+export function syncPreview(state) {
+  const show = state.settings.showPreview
+  ui.previewSection.hidden = !show
+  if (!show) return
+  const lang = state.settings.lang
+  $("preview-label").textContent = translate(lang, "preview")
+  const badge = $("preview-badge")
+  const fits = state.preview && state.preview.some((piece) => pieceFits(state.board, piece))
+  badge.textContent = fits ? translate(lang, "previewOk") : translate(lang, "previewRefresh")
+  badge.className = "badge " + (fits ? "ok" : "warn")
+  ui.preview.replaceChildren()
+  if (!state.preview) return
+  const slotPx = ui.preview.offsetWidth > 0 ? ui.preview.offsetWidth / 3 : 90
+  for (const piece of state.preview) {
+    const wrap = document.createElement("div")
+    wrap.className = "mini"
+    const shape = getShape(piece.shapeId)
+    const px = cellPxFor(shape, slotPx, 16)
+    wrap.appendChild(buildPiece(shape, piece.color, px, 2))
+    ui.preview.appendChild(wrap)
+  }
+}
+
+function setText(id, value) {
+  const el = $(id)
+  if (el && el.textContent !== value) el.textContent = value
+}
+
+export function syncChrome(state) {
+  const lang = state.settings.lang
+  const t = (key) => translate(lang, key)
+  ui.app.dataset.theme = state.settings.theme
+  document.documentElement.dataset.theme = state.settings.theme
+  document.documentElement.lang = lang
+  document.title = t("title")
+  const theme = getComputedStyle(ui.app).getPropertyValue("--theme-color").trim()
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta && theme) meta.setAttribute("content", theme)
+
+  setText("title", t("title"))
+  setText("score", String(state.score))
+  setText("score-label", t("score"))
+  const difficulty = state.difficulty || "normal"
+  const level = levelOf(difficulty)
+  const diffKey = {
+    veryEasy: "diffVeryEasy",
+    easy: "diffEasy",
+    normal: "diffNormal",
+    hard: "diffHard",
+    expert: "diffExpert",
+  }[difficulty] || "diffNormal"
+  setText("diff-name", t(diffKey))
+  const mult = $("mult-wrap")
+  if (mult) {
+    mult.hidden = !(level.multiplier > 1)
+    setText("mult-label", t("multiplier"))
+    setText("mult", "×" + (level.multiplier || 1))
+  }
+  setText("best-label", t("best"))
+  setText("best", String(state.best))
+  setText("streak-label", t("streak"))
+  setText("streak", "×" + state.streak)
+  $("streak-wrap").hidden = state.streak < 1
+  const hintEl = $("hint")
+  if (!hintEl.classList.contains("status")) {
+    setText("hint", t("hint"))
+    hintEl.hidden = state.settings.seenHint
+  }
+  setText("btn-new", t("newGame"))
+  setText("btn-hint-label", t("hintBtn"))
+  const hintBtn = $("btn-hint")
+  const badge = $("hint-count")
+  if (level.hintMode === "none") {
+    hintBtn.disabled = true
+    badge.hidden = true
+    hintBtn.title = t("hintOff")
+  } else {
+    hintBtn.disabled = false
+    badge.hidden = false
+    hintBtn.removeAttribute("title")
+    badge.textContent = state.hintsLeft == null ? "∞" : String(state.hintsLeft)
+  }
+  const undoBtn = $("btn-undo")
+  const undoBadge = $("undo-count")
+  setText("btn-undo-label", t("undo"))
+  undoBtn.setAttribute("aria-label", t("undo"))
+  if (level.undoMax === 0) {
+    undoBtn.hidden = true
+    undoBtn.disabled = true
+  } else {
+    undoBtn.hidden = false
+    undoBadge.hidden = false
+    undoBadge.textContent = state.undosLeft == null ? "∞" : String(state.undosLeft ?? 0)
+    undoBtn.disabled = Boolean(state.over) || state.undosLeft === 0 || !state.undo
+  }
+  $("btn-leaderboard").setAttribute("aria-label", t("leaderboard"))
+  setText("name-title", t("enterName"))
+  setText("name-skip", t("skip"))
+  setText("name-save", t("save"))
+  setText("lb-title", t("leaderboard"))
+  setText("lb-close", t("close"))
+  setText("diff-label", t("difficulty"))
+  syncDiffChips(state, t)
+  setText("board-caption", t("boardLabel"))
+  ui.board.setAttribute("aria-label", t("boardLabel"))
+
+  const sound = $("btn-sound")
+  sound.setAttribute("aria-label", state.settings.muted ? t("soundOn") : t("soundOff"))
+  sound.setAttribute("aria-pressed", state.settings.muted ? "false" : "true")
+  sound.classList.toggle("is-muted", state.settings.muted)
+
+  $("btn-settings").setAttribute("aria-label", t("settings"))
+  setText("settings-title", t("settings"))
+  setText("lang-label", t("lang"))
+  setText("theme-label", t("theme"))
+  setText("opt-preview-label", t("previewToggle"))
+  setText("fair-note", t("fairNote"))
+  setText("btn-close-settings", t("close"))
+  $("opt-preview").checked = state.settings.showPreview
+
+  const themeNames = {
+    classic: t("themeClassic"),
+    dark: t("themeDark"),
+    pastel: t("themePastel"),
+    wood: t("themeWood"),
+  }
+  for (const button of document.querySelectorAll("[data-theme-pick]")) {
+    const name = button.dataset.themePick
+    button.setAttribute("aria-label", themeNames[name] || name)
+    button.setAttribute("aria-pressed", name === state.settings.theme ? "true" : "false")
+  }
+  for (const button of document.querySelectorAll("[data-lang-pick]")) {
+    button.setAttribute("aria-pressed", button.dataset.langPick === lang ? "true" : "false")
+  }
+
+  setText("over-title", t("gameOver"))
+  setText("over-hint", t("gameOverHint"))
+  setText("over-score-label", t("score"))
+  setText("over-score", String(state.score))
+  setText("over-best-label", t("best"))
+  setText("over-best", String(state.best))
+  setText("btn-again", t("again"))
+  $("overlay").classList.toggle("open", state.over)
+  $("overlay").setAttribute("aria-hidden", state.over ? "false" : "true")
+
+  setText("confirm-title", t("confirmTitle"))
+  setText("confirm-hint", t("confirmHint"))
+  setText("confirm-yes", t("confirmYes"))
+  setText("confirm-no", t("confirmNo"))
+
+  if (lastScore !== null && state.score !== lastScore) {
+    const scoreEl = $("score")
+    scoreEl.classList.remove("bump")
+    void scoreEl.offsetWidth
+    scoreEl.classList.add("bump")
+  }
+  lastScore = state.score
+}
+
+export function render(state) {
+  syncChrome(state)
+  syncBoard(state.board)
+  syncTray(state)
+  syncPreview(state)
+  fitBoard()
+}
+
+export function showFloat(lang, { gained, linesCleared, streak, newRecord }) {
+  const el = $("floater")
+  $("floater-main").textContent = "+" + gained
+  $("floater-sub").textContent = floatCaption(lang, { linesCleared, streak, newRecord })
+  el.hidden = false
+  el.classList.remove("show")
+  void el.offsetWidth
+  el.classList.add("show")
+}
+
+export function pulseBoard() {
+  ui.board.classList.remove("pulse")
+  void ui.board.offsetWidth
+  ui.board.classList.add("pulse")
+}
+
+export function setSettingsOpen(open) {
+  $("settings-backdrop").classList.toggle("open", open)
+  $("settings").classList.toggle("open", open)
+  $("settings").setAttribute("aria-hidden", open ? "false" : "true")
+  $("btn-settings").setAttribute("aria-expanded", open ? "true" : "false")
+}
+
+export function setConfirmOpen(open) {
+  $("confirm").classList.toggle("open", open)
+  $("confirm").setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function mountGhost(shape, color, cellPx, gapPx) {
+  ui.ghost.replaceChildren(buildPiece(shape, color, cellPx, gapPx))
+  ui.ghost.hidden = false
+  ui.ghost.classList.add("visible")
+  return ui.ghost
+}
+
+export function moveGhost(x, y) {
+  ui.ghost.style.left = x + "px"
+  ui.ghost.style.top = y + "px"
+}
+
+export function hideGhost() {
+  ui.ghost.hidden = true
+  ui.ghost.classList.remove("visible", "shake")
+  ui.ghost.replaceChildren()
+}
+
+export function shakeGhost() {
+  ui.ghost.classList.remove("shake")
+  void ui.ghost.offsetWidth
+  ui.ghost.classList.add("shake")
+}
+
+export function markSlotDragging(index, on) {
+  const slot = ui.tray.querySelector('[data-slot="' + index + '"]')
+  if (slot) slot.classList.toggle("dragging", on)
+}
+
+export function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+}
+
+const BLURBS = {
+  veryEasy: "blurbVeryEasy",
+  easy: "blurbEasy",
+  normal: "blurbNormal",
+  hard: "blurbHard",
+  expert: "blurbExpert",
+}
+
+const DIFF_NAMES = {
+  veryEasy: "diffVeryEasy",
+  easy: "diffEasy",
+  normal: "diffNormal",
+  hard: "diffHard",
+  expert: "diffExpert",
+}
+
+function syncDiffChips(state, t) {
+  const root = $("diff-picks")
+  if (!root) return
+  if (root.childElementCount === 0) {
+    for (const id of DIFFICULTIES) {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.className = "level"
+      button.dataset.diff = id
+      root.appendChild(button)
+    }
+  }
+  for (const button of root.querySelectorAll("[data-diff]")) {
+    const id = button.dataset.diff
+    button.textContent = t(DIFF_NAMES[id] || id)
+    button.setAttribute("aria-pressed", id === (state.difficulty || "normal") ? "true" : "false")
+  }
+}
+
+export function syncPicker(state, selected) {
+  const lang = state.settings.lang
+  const t = (key) => translate(lang, key)
+  setText("picker-title", t("chooseDifficulty"))
+  setText("btn-play", t("play"))
+  const root = $("levels")
+  root.replaceChildren()
+  const bests = state.bests || {}
+  for (const id of DIFFICULTIES) {
+    const button = document.createElement("button")
+    button.type = "button"
+    button.className = "level"
+    button.dataset.diff = id
+    button.setAttribute("aria-pressed", id === selected ? "true" : "false")
+    const name = document.createElement("span")
+    name.className = "level-name"
+    name.textContent = t(DIFF_NAMES[id])
+    const best = document.createElement("span")
+    best.className = "level-best"
+    const value = Number.isFinite(bests[id]) ? bests[id] : id === (state.difficulty || "normal") ? state.best : 0
+    best.textContent = t("best") + " " + value
+    const blurb = document.createElement("span")
+    blurb.className = "level-blurb"
+    blurb.textContent = t(BLURBS[id])
+    button.append(name, best, blurb)
+    root.appendChild(button)
+  }
+}
+
+export function setNameOpen(open) {
+  const el = $("name-modal")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function setNameHint(text, bad) {
+  const el = $("name-hint")
+  el.textContent = text || ""
+  el.classList.toggle("warn", Boolean(bad))
+}
+
+export function setLeaderOpen(open) {
+  const el = $("leaderboard")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function renderLeaderboard(lang, level, view) {
+  const t = (key) => translate(lang, key)
+  setText("lb-title", t("leaderboard"))
+  setText("lb-close", t("close"))
+  const tabs = $("lb-tabs")
+  if (tabs.childElementCount === 0) {
+    for (const id of DIFFICULTIES) {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.dataset.lb = id
+      tabs.appendChild(button)
+    }
+  }
+  for (const button of tabs.querySelectorAll("[data-lb]")) {
+    button.textContent = t(DIFF_NAMES[button.dataset.lb] || button.dataset.lb)
+    button.setAttribute("aria-pressed", button.dataset.lb === level ? "true" : "false")
+  }
+  const status = $("lb-status")
+  const list = $("lb-list")
+  const place = $("lb-place")
+  list.replaceChildren()
+  place.hidden = true
+  if (!view || view.status === "loading") {
+    status.hidden = false
+    status.textContent = t("loading")
+    return
+  }
+  if (view.status === "offline") {
+    status.hidden = false
+    status.textContent = t("noNetwork")
+    return
+  }
+  if (!view.rows || view.rows.length === 0) {
+    status.hidden = false
+    status.textContent = t("noRecords")
+    return
+  }
+  status.hidden = true
+  status.textContent = ""
+  for (const row of view.rows) {
+    const el = document.createElement("div")
+    el.className = "lb-row" + (row.mine ? " mine" : "")
+    const rank = document.createElement("span")
+    rank.className = "lb-rank"
+    rank.textContent = String(row.rank)
+    const name = document.createElement("span")
+    name.className = "lb-name"
+    name.textContent = row.name
+    const score = document.createElement("span")
+    score.className = "lb-score"
+    score.textContent = String(row.score)
+    el.append(rank, name, score)
+    list.appendChild(el)
+  }
+  if (view.place) {
+    place.hidden = false
+    place.textContent = t("yourPlace") + ": " + view.place.rank + " · " + view.place.score
+  }
+}
+
+export function setPickerOpen(open) {
+  const el = $("picker")
+  el.classList.toggle("open", open)
+  el.setAttribute("aria-hidden", open ? "false" : "true")
+}
+
+export function clearPlan() {
+  for (const cell of ui.cells) {
+    cell.classList.remove("plan")
+    cell.style.removeProperty("animation-delay")
+    if (!cell.classList.contains("hint")) cell.style.removeProperty("--hint")
+    const badge = cell.querySelector(":scope > .order")
+    if (badge) badge.remove()
+  }
+  if (!ui.tray) return
+  for (const slot of ui.tray.querySelectorAll(".planned")) {
+    slot.classList.remove("planned")
+    const badge = slot.querySelector(":scope > .order")
+    if (badge) badge.remove()
+  }
+}
+
+/** Ghost the hint steps. Overlapping cells keep the earliest order number. */
+export function paintPlan(board, hand, steps) {
+  clearPlan()
+  if (!steps || steps.length === 0) return
+  const claimed = new Map()
+  for (const step of steps) {
+    const piece = hand[step.slot]
+    if (!piece) continue
+    const shape = getShape(piece.shapeId)
+    if (!shape) continue
+    for (const [dr, dc] of shape.cells) {
+      const r = step.row + dr
+      const c = step.col + dc
+      if (r < 0 || c < 0 || r >= SIZE || c >= SIZE) continue
+      const index = r * SIZE + c
+      const prev = claimed.get(index)
+      if (prev && prev.order <= step.order) continue
+      claimed.set(index, { order: step.order, color: piece.color })
+    }
+  }
+  for (const [index, info] of claimed) {
+    const el = ui.cells[index]
+    if (!el) continue
+    el.classList.add("plan")
+    el.style.setProperty("--hint", "var(--p" + info.color + ")")
+    el.style.animationDelay = (info.order - 1) * 120 + "ms"
+    const badge = document.createElement("span")
+    badge.className = "order"
+    badge.textContent = String(info.order)
+    el.appendChild(badge)
+  }
+  const slotOrder = new Map()
+  for (const step of steps) {
+    if (!slotOrder.has(step.slot) || step.order < slotOrder.get(step.slot)) {
+      slotOrder.set(step.slot, step.order)
+    }
+  }
+  for (const [slot, order] of slotOrder) {
+    const el = ui.tray.querySelector('[data-slot="' + slot + '"]')
+    if (!el) continue
+    el.classList.add("planned")
+    el.style.animationDelay = (order - 1) * 120 + "ms"
+    const badge = document.createElement("span")
+    badge.className = "order"
+    badge.textContent = String(order)
+    el.appendChild(badge)
+  }
+}
+
+export function showHintMessage(lang, key) {
+  const el = $("hint")
+  el.hidden = false
+  el.classList.add("status")
+  el.textContent = translate(lang, key)
+}

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3d4ec4">
+  <meta name="description" content="Честные блоки — офлайн-головоломка 8×8 без рекламы. В каждом наборе есть ход.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Честные блоки">
+  <title>Честные блоки</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="app" class="app" data-theme="classic">
+    <header class="top">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><i></i><i></i><i></i></span>
+        <h1 id="title">Честные блоки</h1>
+      </div>
+      <div class="top-actions">
+        <button id="btn-leaderboard" class="icon-btn" type="button" aria-label="Таблица рекордов">🏆</button>
+        <button id="btn-sound" class="icon-btn" type="button" aria-pressed="true" aria-label="Выключить звук">
+          <svg class="icon icon-on" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M4 9h3.2L12 5.2v13.6L7.2 15H4V9zm11.2 3a3.2 3.2 0 0 0-1.7-2.8v5.6A3.2 3.2 0 0 0 15.2 12zm-1.7-6.3v1.7a5.3 5.3 0 0 1 0 9.2v1.7a7 7 0 0 0 0-12.6z"/>
+          </svg>
+          <svg class="icon icon-off" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M4 9h3.2L12 5.2v13.6L7.2 15H4V9zm14.1 3 2.2-2.2-1.4-1.4L16.7 10.6 14.5 8.4l-1.4 1.4L15.3 12l-2.2 2.2 1.4 1.4 2.2-2.2 2.2 2.2 1.4-1.4z"/>
+          </svg>
+        </button>
+        <button id="btn-settings" class="icon-btn" type="button" aria-expanded="false" aria-label="Настройки">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M12 8.2A3.8 3.8 0 1 0 12 15.8 3.8 3.8 0 0 0 12 8.2zm8.4 4.3-1.5-.3a6.4 6.4 0 0 0-.6-1.5l.9-1.2a.9.9 0 0 0-.1-1.2l-1.1-1.1a.9.9 0 0 0-1.2-.1l-1.2.9a6.4 6.4 0 0 0-1.5-.6l-.3-1.5a.9.9 0 0 0-.9-.7h-1.6a.9.9 0 0 0-.9.7l-.3 1.5c-.5.1-1 .4-1.5.6l-1.2-.9a.9.9 0 0 0-1.2.1L4.9 8.3a.9.9 0 0 0-.1 1.2l.9 1.2c-.3.5-.5 1-.6 1.5l-1.5.3a.9.9 0 0 0-.7.9v1.6c0 .4.3.8.7.9l1.5.3c.1.5.3 1 .6 1.5l-.9 1.2a.9.9 0 0 0 .1 1.2l1.1 1.1c.3.3.8.4 1.2.1l1.2-.9c.5.3 1 .5 1.5.6l.3 1.5c.1.4.5.7.9.7h1.6c.4 0 .8-.3.9-.7l.3-1.5c.5-.1 1-.3 1.5-.6l1.2.9c.4.3.9.2 1.2-.1l1.1-1.1a.9.9 0 0 0 .1-1.2l-.9-1.2c.3-.5.5-1 .6-1.5l1.5-.3c.4-.1.7-.5.7-.9v-1.6a.9.9 0 0 0-.7-.9z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <section class="scoreboard" aria-live="polite">
+      <p id="score" class="score">0</p>
+      <p class="subline">
+        <span id="score-label">Очки</span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span id="diff-name">Нормально</span>
+        <span id="mult-wrap" hidden>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="mult-label">Множитель</span>
+          <strong id="mult">×2</strong>
+        </span>
+        <span class="sep" aria-hidden="true">·</span>
+        <span id="best-label">Рекорд</span>
+        <strong id="best">0</strong>
+        <span id="streak-wrap" hidden>
+          <span class="sep" aria-hidden="true">·</span>
+          <span id="streak-label">Серия</span>
+          <strong id="streak">×1</strong>
+        </span>
+      </p>
+    </section>
+
+    <p id="hint" class="hint">Перетащите фигуру на поле</p>
+
+    <div class="board-wrap">
+      <div id="board" class="board" role="grid" aria-label="Игровое поле"></div>
+      <div id="floater" class="floater" hidden>
+        <strong id="floater-main"></strong>
+        <span id="floater-sub"></span>
+      </div>
+    </div>
+    <span id="board-caption" class="sr-only">Игровое поле</span>
+
+    <section id="preview-section" class="preview" aria-label="Следующие">
+      <div class="preview-head">
+        <span id="preview-label">Следующие</span>
+        <span id="preview-badge" class="badge ok">подходит</span>
+      </div>
+      <div id="preview" class="preview-row"></div>
+    </section>
+
+    <section id="tray" class="tray"></section>
+
+    <footer class="footer">
+      <button id="btn-undo" class="btn undo-btn" type="button">
+        <span id="btn-undo-label">Отменить</span>
+        <span id="undo-count" class="count">3</span>
+      </button>
+      <button id="btn-hint" class="btn hint-btn" type="button">
+        <span id="btn-hint-label">Подсказка</span>
+        <span id="hint-count" class="count">3</span>
+      </button>
+      <button id="btn-new" class="btn" type="button">Новая игра</button>
+    </footer>
+
+    <div id="settings-backdrop" class="backdrop"></div>
+    <section id="settings" class="sheet" aria-hidden="true">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h2 id="settings-title">Настройки</h2>
+      <p id="lang-label" class="field-label">Язык</p>
+      <div class="segmented" role="group">
+        <button type="button" data-lang-pick="ru" aria-pressed="true">РУС</button>
+        <button type="button" data-lang-pick="kk" aria-pressed="false">ҚАЗ</button>
+        <button type="button" data-lang-pick="en" aria-pressed="false">ENG</button>
+      </div>
+      <p id="diff-label" class="field-label">Сложность</p>
+      <div id="diff-picks" class="diff-picks" role="group"></div>
+      <p id="theme-label" class="field-label">Тема</p>
+      <div class="themes" role="group">
+        <button type="button" class="swatch swatch-classic" data-theme-pick="classic" aria-pressed="true" aria-label="Классика"></button>
+        <button type="button" class="swatch swatch-dark" data-theme-pick="dark" aria-pressed="false" aria-label="Тёмная"></button>
+        <button type="button" class="swatch swatch-pastel" data-theme-pick="pastel" aria-pressed="false" aria-label="Пастель"></button>
+        <button type="button" class="swatch swatch-wood" data-theme-pick="wood" aria-pressed="false" aria-label="Дерево"></button>
+      </div>
+      <label class="check">
+        <input id="opt-preview" type="checkbox" checked>
+        <span id="opt-preview-label">Показывать следующий набор</span>
+      </label>
+      <p id="fair-note" class="note">В каждом наборе есть хотя бы одна фигура, которая помещается на поле. Раздача не зависит от очков.</p>
+      <button id="btn-close-settings" class="btn" type="button">Закрыть</button>
+    </section>
+
+    <div id="overlay" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="over-title">
+      <div class="card">
+        <h2 id="over-title">Ход невозможен</h2>
+        <p id="over-hint">Ни одна из оставшихся фигур не помещается на поле.</p>
+        <p class="over-score"><span id="over-score-label">Очки</span> <strong id="over-score">0</strong></p>
+        <p class="over-best"><span id="over-best-label">Рекорд</span> <strong id="over-best">0</strong></p>
+        <button id="btn-again" class="btn primary" type="button">Заново</button>
+      </div>
+    </div>
+
+    <div id="picker" class="overlay picker" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="picker-title">
+      <div class="card picker-card">
+        <h2 id="picker-title">Выберите сложность</h2>
+        <div id="levels" class="levels"></div>
+        <button id="btn-play" class="btn primary" type="button">Играть</button>
+      </div>
+    </div>
+
+    <div id="confirm" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="confirm-title">
+      <div class="card">
+        <h2 id="confirm-title">Начать заново?</h2>
+        <p id="confirm-hint">Очки этой партии сбросятся. Рекорд сохранится.</p>
+        <div class="confirm-actions">
+          <button id="confirm-no" class="btn" type="button">Нет</button>
+          <button id="confirm-yes" class="btn primary" type="button">Да</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="name-modal" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="name-title">
+      <div class="card">
+        <h2 id="name-title">Введите имя для таблицы рекордов</h2>
+        <input id="name-input" class="name-input" type="text" maxlength="24" autocomplete="nickname" enterkeyhint="done">
+        <p id="name-hint" class="note"></p>
+        <div class="confirm-actions">
+          <button id="name-skip" class="btn" type="button">Пропустить</button>
+          <button id="name-save" class="btn primary" type="button" disabled>Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="leaderboard" class="overlay" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="lb-title">
+      <div class="card lb-card">
+        <h2 id="lb-title">Таблица рекордов</h2>
+        <div id="lb-tabs" class="lb-tabs" role="tablist"></div>
+        <p id="lb-status" class="note"></p>
+        <div id="lb-list" class="lb-list"></div>
+        <p id="lb-place" class="lb-place" hidden></p>
+        <button id="lb-close" class="btn" type="button">Закрыть</button>
+      </div>
+    </div>
+
+    <div id="ghost" class="ghost" hidden></div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
